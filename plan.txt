@@ -1,22 +1,26 @@
-do a comprehensvie review of the project, understand what it is doing right now and then i want you to understnad that
-this is project is not a create a interface that looks like the a car, we're using that more a metaphor for our experiment, 
-the key idea is a research idea to find a faster way to navigations through lists using audio only. The goal is to make it 
-faster than any aviable rersearch method found. 
+so, here the things, the backend and the concpet of the project is good, but now we want to use this for time series data specifically using 
+time series data of log statement from clound incidents to detect a failure in teh service or analmoly or degredation of the service. So, now,
+instead of a phonebook, we will have a generated log data, and they will be tagged so for example, some will be on CPU Utilization, 
+some on Memory Utilization, some on Network I/O, some on Disk I/O, some on Request Latency, some on Error Rate. Like simple metrics like 
+this common in API Services. And now what we want to is to have 5 levels, like we have last time and in each of the levels, and we will
+use unique sounds for each of the metrics. Now for a given metric, let's say, this is a time series data and for now the metric selectedis CPU Util
+and for some time, this is fine, and then there there is an anmoly detected, we want to to change in the amplictube and something else of sound to 
+indicate something is going wrong. Let's say something is going wrong in the minute 3, so i want you start increasinf the sounf at kminute 2.5 only like it shuold be smooth rise rather thana sharp one.
+ Also these sounds must be different from each other, so that we can distinguish between different metrics. I there's no metrics for that given time
+ preioid just keep that sound to minimum threshold. You can also make use of some earcons.
 
-Ok, so here is what we have to do. For the phone book, right internally we're demoonstrating this as a list.
-But this is not what we're supposed to do. A better way would be a have 5 gears or 5 levels of increasing and decreasing speed
-and instead of linearly increaring the speed. We start of a the first element, in a trie like data structure, so the in first gear 
-we bascially go from index 1 to index 2. But now, think of the problem this way, it's like a tire with 5 levels, if let's say in the first
-gear, we start a 1, and bascially the fifth gear would be us going thorugh alphaberts, A, B, C, D, and then the fourth level would be AA, AB, 
-the third level would be AAA AAB, and then second would be 4 letter like jumping like that and the normal one would be just using the full index
-and incresing the index by 1.
+Now, for levels of how this is going to work, level 5 would be the top levle where we would start, and in that what we're gonna do is that
+that's going to be sound click which aggregates a lot of the data, so for every minute of data, I want you to compress that sound generated into 
+10 times less time, for level 4, only 5 times less so the sounds is more granular, and this way, so we want to still keep on increasing the 
+granularity of the sound until levle 2. And then only level 1 we want to  start reading the actual log statement for that metric. 
 
-You get the point right, instead of using a linear structure to navigate, we use a tree like structure to navigate, and we can switch between the gears
-to change the speed of the navigation, so that we can find the element we're looking for faster.
+We can use a use a lof of components that we were using for in acoustic drive, and make sure to implement the elastic braking and stuff like
+that and there's still going to be buttons we we can change the level and stuff like that, and can choose a metric for now, we can have 5 metrics, CPU Util, Mem Util, 
+Network I/O, Disk I/O, Request Latency, Error Rate. And then we can have a slider for switching between levels, etc. You can have a look at the code of acoustic drive 
+for more details. Also for level 1, for the log reading part, we can generate a random log statement for each of the metric, just to show the working.
 
-The internal data structure would look like a trie where it has access the left left to it, above it, below it, right right to it. So, bacially, 
-when you start at gear 1, you're at the index 1, let's say the name was ANSEL, the second one was ANTHONY, the third was ANTIQUITY, then 4th
-was ANTARCTICA. When in gear 1, we'll start of at ANSEL, and iterate list index + 1, BUT THEN when we shift our gear to 2, you'll then start jumping, 
-ANSE, ANSF (if that's present) or the element to the right of in their data strucre. 
+try to use as much for the last project as you can. 
 
-Now for the UI part, keep it realivley simialt but we may need to redo the scrollign anumationg to take in the accont rapid speed increases.
+most probably, you wouldn need a separate audio module, or you can resuse the same one, a differennt one for data generation and filtering. Go on 
+the interent and try to find libraries that can make life easier and make sure the UI components follow the same theme as the acoustic drive project
+try to read and understnad what the orginal project was trying to do and then mold it. 

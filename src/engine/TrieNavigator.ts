@@ -1,17 +1,18 @@
-import { Contact } from '../data/mockDirectory';
-
 export class TrieNode {
-  prefix: string;
+  startTime: number;
+  endTime: number; // exclusive
   depth: number;
+  
   parent: TrieNode | null = null;
   children: TrieNode[] = [];
   nextSibling: TrieNode | null = null;
   prevSibling: TrieNode | null = null;
-  contact?: Contact;
-  linearIndex: number = -1; 
+  
+  linearIndex: number = -1; // Only for leaves
 
-  constructor(prefix: string, depth: number) {
-    this.prefix = prefix;
+  constructor(startTime: number, endTime: number, depth: number) {
+    this.startTime = startTime;
+    this.endTime = endTime;
     this.depth = depth;
   }
 
@@ -35,60 +36,61 @@ export class TrieNode {
 export class TrieNavigator {
   root: TrieNode;
   leaves: TrieNode[] = [];
-  depthNodes: { [depth: number]: TrieNode[] } = { 1: [], 2: [], 3: [], 4: [] };
+  depthNodes: { [depth: number]: TrieNode[] } = { 1: [], 2: [], 3: [], 4: [], 5: [] };
 
-  constructor(contacts: Contact[]) {
-    this.root = new TrieNode("", 0);
-    this.buildTrie(contacts);
+  constructor() {
+    this.root = new TrieNode(0, 600, 1);
+    this.depthNodes[1].push(this.root);
+    this.buildTrie();
     this.buildLateralLinks();
   }
 
-  private buildTrie(contacts: Contact[]) {
-    for (let i = 0; i < contacts.length; i++) {
-      const contact = contacts[i];
-      let current = this.root;
-      
-      // Use clean alphanumeric chars for prefix levels
-      const cleanName = contact.name.toUpperCase();
-      
-      for (let depth = 1; depth <= 4; depth++) {
-        // Stop creating depth nodes if the name is too short (e.g., "Wu")
-        // But we need to ensure the depth hierarchy remains intact for gear shifting.
-        // If name is short, just pad it or use the full name as prefix to keep the structure.
-        const prefix = cleanName.substring(0, Math.min(depth, cleanName.length));
-        
-        let child = current.children.find(c => c.prefix === prefix);
-        if (!child) {
-          child = new TrieNode(prefix, depth);
-          child.parent = current;
-          current.children.push(child);
-          this.depthNodes[depth].push(child);
-        }
-        current = child;
-      }
-      
-      // Depth 5: The Leaf (Gear 1)
-      const leaf = new TrieNode(contact.name, 5);
-      leaf.parent = current;
-      leaf.contact = contact;
-      leaf.linearIndex = i;
-      current.children.push(leaf);
-      this.leaves.push(leaf);
+  private buildTrie() {
+    // Level 4 (Depth 2): 5 nodes, 120s each
+    for (let i = 0; i < 5; i++) {
+       const l4 = new TrieNode(i * 120, (i + 1) * 120, 2);
+       l4.parent = this.root;
+       this.root.children.push(l4);
+       this.depthNodes[2].push(l4);
+       
+       // Level 3 (Depth 3): 2 nodes per L4, 60s each
+       for (let j = 0; j < 2; j++) {
+           const l3StartTime = l4.startTime + j * 60;
+           const l3 = new TrieNode(l3StartTime, l3StartTime + 60, 3);
+           l3.parent = l4;
+           l4.children.push(l3);
+           this.depthNodes[3].push(l3);
+           
+           // Level 2 (Depth 4): 3 nodes per L3, 20s each
+           for (let k = 0; k < 3; k++) {
+              const l2StartTime = l3.startTime + k * 20;
+              const l2 = new TrieNode(l2StartTime, l2StartTime + 20, 4);
+              l2.parent = l3;
+              l3.children.push(l2);
+              this.depthNodes[4].push(l2);
+              
+              // Level 1 (Depth 5): 20 nodes per L2, 1s each (leaves)
+              for (let m = 0; m < 20; m++) {
+                 const l1StartTime = l2.startTime + m * 1;
+                 const l1 = new TrieNode(l1StartTime, l1StartTime + 1, 5);
+                 l1.parent = l2;
+                 l1.linearIndex = this.leaves.length;
+                 l2.children.push(l1);
+                 this.depthNodes[5].push(l1);
+                 this.leaves.push(l1);
+              }
+           }
+       }
     }
   }
 
   private buildLateralLinks() {
-    for (let depth = 1; depth <= 4; depth++) {
+    for (let depth = 1; depth <= 5; depth++) {
       const nodes = this.depthNodes[depth];
       for (let i = 0; i < nodes.length; i++) {
         nodes[i].prevSibling = i > 0 ? nodes[i-1] : null;
         nodes[i].nextSibling = i < nodes.length - 1 ? nodes[i+1] : null;
       }
-    }
-    // Link Leaves
-    for (let i = 0; i < this.leaves.length; i++) {
-      this.leaves[i].prevSibling = i > 0 ? this.leaves[i-1] : null;
-      this.leaves[i].nextSibling = i < this.leaves.length - 1 ? this.leaves[i+1] : null;
     }
   }
 

@@ -1,35 +1,36 @@
 import { useEffect, useRef, useState, useMemo } from 'react';
-import { MOCK_DIRECTORY } from '../data/mockDirectory';
-import { AudioAnnouncer } from '../engine/AudioAnnouncer';
+import { MOCK_TIME_SERIES, MetricType, METRICS } from '../data/mockTimeSeries';
+import { AudioEngine } from '../engine/AudioEngine';
 import { TrieNavigator, TrieNode } from '../engine/TrieNavigator';
 import DriveControls from './DriveControls';
-import { Activity, Gauge, Navigation, Layers, History, Clock, Network } from 'lucide-react';
-import './ListVisualizer.css';
+import { Activity, Gauge, Navigation, Layers, Clock } from 'lucide-react';
+import './TimelineVisualizer.css';
 
 const ITEM_HEIGHT = 80;
 const VISIBLE_COUNT = 15;
-const LIST_SIZE = MOCK_DIRECTORY.length;
-const MAX_LEVEL = 6;
-const ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("");
+const MAX_LEVEL = 5;
 
-export default function ListVisualizer() {
+// Formatting helper
+const formatTime = (seconds: number) => {
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  return `${m}:${s.toString().padStart(2, '0')}`;
+};
+
+export default function TimelineVisualizer() {
   const [level, setLevel] = useState(0);
   const [mode, setMode] = useState<'linear' | 'exponential'>('linear');
   const [baseSpeed, setBaseSpeed] = useState(0.5);
   const [audioEnabled, setAudioEnabled] = useState(false);
   const [displayVelocity, setDisplayVelocity] = useState(0);
-  const [devMode, setDevMode] = useState(false);
+  const [devMode] = useState(false);
   
-  // New Metrics & Immersion
-  const [peakWpm, setPeakWpm] = useState(0);
-  const [sessionCount, setSessionCount] = useState(0);
+  const [activeMetric, setActiveMetric] = useState<MetricType>('CPU');
+  
   const [isSpeaking, setIsSpeaking] = useState(false);
-  const [history, setHistory] = useState<string[]>([]);
-  const spokenItems = useRef<Set<string>>(new Set());
   
-  const trieNavigator = useMemo(() => new TrieNavigator(MOCK_DIRECTORY), []);
+  const trieNavigator = useMemo(() => new TrieNavigator(), []);
   const currentNodeRef = useRef<TrieNode>(trieNavigator.getLeafAt(0));
-  const lastSpokenNodeRef = useRef<TrieNode | null>(null);
   const clutchUntilRef = useRef<number>(0);
   const hopProgressRef = useRef(0);
   const targetLinearIndexRef = useRef(0);
@@ -37,17 +38,17 @@ export default function ListVisualizer() {
   const positionRef = useRef(0);
   const [scrollTop, setScrollTop] = useState(0);
   const lastTimeRef = useRef<number>(performance.now());
-  const announcerRef = useRef(AudioAnnouncer.getInstance());
+  const announcerRef = useRef(AudioEngine.getInstance());
 
-  // Transparently enable audio on first interaction
+  const activeData = MOCK_TIME_SERIES[activeMetric];
+  const listSize = trieNavigator.leaves.length;
+
   useEffect(() => {
     if (audioEnabled) return;
-    
     const unlock = () => {
        announcerRef.current.init();
        setAudioEnabled(true);
     };
-    
     window.addEventListener('keydown', unlock, { once: true });
     window.addEventListener('pointerdown', unlock, { once: true });
     return () => {
@@ -56,7 +57,6 @@ export default function ListVisualizer() {
     };
   }, [audioEnabled]);
 
-  // Handle speed and scrolling loops directly
   useEffect(() => {
     let reqId: number;
     let speakTimer: any;
@@ -78,20 +78,19 @@ export default function ListVisualizer() {
       
       if (Math.abs(velocity) !== Math.abs(displayVelocity)) {
           setDisplayVelocity(velocity);
-          const currentWpm = Math.abs(Math.round(velocity * 60));
-          setPeakWpm(prev => Math.max(prev, currentWpm));
       }
       
       if (level !== 0) {
+         if (audioEnabled) {
+            announcerRef.current.startDriving(activeMetric);
+         }
+         
          const sign = Math.sign(level);
          const absLevel = Math.abs(level);
          
          // 1. Shift Gears (Vertical movement in Trie)
-         let targetDepth = 5; // Gear 1 (Leaf)
-         if (absLevel === 2) targetDepth = 4;
-         if (absLevel === 3) targetDepth = 3;
-         if (absLevel === 4) targetDepth = 2;
-         if (absLevel >= 5) targetDepth = 1;
+         // Level 1 = Gear 1 (Depth 5). Level 5 = Gear 5 (Depth 1).
+         let targetDepth = 6 - absLevel; 
          
          if (currentNodeRef.current.depth > targetDepth) {
             currentNodeRef.current = currentNodeRef.current.getAncestorAtDepth(targetDepth);
@@ -119,43 +118,44 @@ export default function ListVisualizer() {
              }
          }
          
-         // 3. Audio & UI side effects on Hop
-         if (hopped && audioEnabled) {
-             const leaf = currentNodeRef.current.depth === 5 ? currentNodeRef.current : currentNodeRef.current.getFirstLeaf();
-             const char = currentNodeRef.current.prefix.charAt(0);
-             
-             announcerRef.current.playTick(char);
-             
-             // Adaptive Talking Rate
-             const talkingRate = 1.0;
-             const spellOut = targetDepth < 5; // Spell out prefixes
-             
-             const actuallySpoke = announcerRef.current.speak(currentNodeRef.current.prefix, talkingRate, spellOut, false);
-             if (actuallySpoke) {
-                lastSpokenNodeRef.current = currentNodeRef.current;
+         // 3. Audio & UI side effects
+         if (audioEnabled) {
+             const currentIndex = Math.floor(positionRef.current);
+             if (currentIndex >= 0 && currentIndex < listSize) {
+                 const logEv = activeData[currentIndex];
+                 if (logEv && targetDepth < 5) {
+                    announcerRef.current.updateDriving(logEv.value, Math.abs(velocity));
+                 }
              }
-             
-             // Pulse Effect & History
-             setIsSpeaking(true);
-             clearTimeout(speakTimer);
-             speakTimer = setTimeout(() => setIsSpeaking(false), 200);
 
-             if (leaf.contact && !spokenItems.current.has(leaf.contact.id)) {
-               spokenItems.current.add(leaf.contact.id);
-               setSessionCount(spokenItems.current.size);
-               setHistory(prev => [leaf.contact!.name, ...prev].slice(0, 10));
+             if (hopped) {
+                 setIsSpeaking(true);
+                 clearTimeout(speakTimer);
+                 speakTimer = setTimeout(() => setIsSpeaking(false), 200);
+
+                 if (targetDepth === 5) { // Level 1 (Leaves)
+                    const logEv = activeData[currentNodeRef.current.startTime];
+                    if (logEv) {
+                       announcerRef.current.stopDriving();
+                       announcerRef.current.speakLog(logEv.message);
+                    }
+                 }
              }
+         }
+      } else {
+         if (audioEnabled) {
+            announcerRef.current.stopDriving();
          }
       }
       
-      // 4. Update target linear index
+      // 4. Update target linear index for smooth scrolling
       targetLinearIndexRef.current = currentNodeRef.current.depth === 5 
         ? currentNodeRef.current.linearIndex 
         : currentNodeRef.current.getFirstLeaf().linearIndex;
 
       // 5. Smooth visual interpolation
       const diff = targetLinearIndexRef.current - positionRef.current;
-      positionRef.current += diff * 15 * dt; // frame-rate independent easing
+      positionRef.current += diff * 15 * dt; 
       if (Math.abs(diff) < 0.05) positionRef.current = targetLinearIndexRef.current;
       
       setScrollTop(positionRef.current * ITEM_HEIGHT);
@@ -166,13 +166,12 @@ export default function ListVisualizer() {
       cancelAnimationFrame(reqId);
       clearTimeout(speakTimer);
     };
-  }, [level, mode, audioEnabled, baseSpeed, displayVelocity]);
+  }, [level, mode, audioEnabled, baseSpeed, displayVelocity, activeMetric, activeData]);
   
   // Keyboard Bindings
   useEffect(() => {
      const onKeyDown = (e: KeyboardEvent) => {
         if (!audioEnabled) return; 
-
         if (e.key === 'w' || e.key === 'W') {
            setLevel(prev => {
               clutchUntilRef.current = performance.now() + 2000;
@@ -184,12 +183,7 @@ export default function ListVisualizer() {
               return Math.max(prev - 1, -MAX_LEVEL);
            });
         } else if (e.key === 'a' || e.key === 'A') {
-           setLevel(() => {
-              if (lastSpokenNodeRef.current) {
-                 currentNodeRef.current = lastSpokenNodeRef.current;
-              }
-              return 0;
-           });
+           setLevel(0);
            announcerRef.current.cancel();
         }
      };
@@ -198,18 +192,33 @@ export default function ListVisualizer() {
   }, [audioEnabled]);
 
   const currentCenterIndex = Math.floor(positionRef.current + 0.5);
-  const currentItem = MOCK_DIRECTORY[currentCenterIndex];
-  const currentLetter = currentItem?.name.charAt(0).toUpperCase();
 
   const startIndex = Math.max(0, currentCenterIndex - Math.floor(VISIBLE_COUNT/2));
-  const endIndex = Math.min(LIST_SIZE - 1, startIndex + VISIBLE_COUNT);
+  const endIndex = Math.min(listSize - 1, startIndex + VISIBLE_COUNT);
   
   const items = useMemo(() => {
     const list = [];
+    
+    let activeDepth = 5;
+    const absLevel = Math.abs(level);
+    if (absLevel > 0) activeDepth = 6 - absLevel;
+    
+    // Determine the active range based on the current node
+    const activeStart = currentNodeRef.current.startTime;
+    const activeEnd = currentNodeRef.current.endTime;
+    
     for (let i = startIndex; i <= endIndex; i++) {
-        const item = MOCK_DIRECTORY[i];
+        const leaf = trieNavigator.leaves[i];
+        const log = activeData[leaf.startTime];
         const offset = (i * ITEM_HEIGHT) - scrollTop;
-        const isCenter = i === currentCenterIndex;
+        
+        // If we are aggregating, highlight all items in the current node's range
+        const isCenter = activeDepth === 5 
+           ? i === currentCenterIndex 
+           : (leaf.startTime >= activeStart && leaf.startTime < activeEnd);
+        
+        // Use center of screen for transform scaling
+        const isScreenCenter = i === currentCenterIndex;
         
         const distFromCenter = Math.abs(offset);
         const opacity = distFromCenter < ITEM_HEIGHT ? 1 : Math.max(0, 1 - (distFromCenter / (ITEM_HEIGHT * (VISIBLE_COUNT/2.8))));
@@ -217,113 +226,53 @@ export default function ListVisualizer() {
 
         list.push(
             <div 
-              key={item.id} 
+              key={leaf.startTime} 
               className={`virtual-item ${isCenter ? 'active' : ''}`}
               style={{ 
-                transform: `translateY(${offset}px) scale(${isCenter ? 1.08 : 1})`, 
+                transform: `translateY(${offset}px) scale(${isScreenCenter ? 1.08 : 1})`, 
                 opacity,
                 filter: `blur(${blur}px)`
               }}
             >
               <div className="item-card">
-                <div className="item-name serif-text">{item.name}</div>
-                <div className="item-phone">{item.phone}</div>
+                <div className="item-time">{formatTime(log.timestamp)}</div>
+                {activeDepth === 5 ? (
+                    <div className="log-message">{log.message}</div>
+                ) : (
+                    <div className="item-value">{(log.value * 100).toFixed(1)}%</div>
+                )}
               </div>
             </div>
         );
     }
     return list;
-  }, [startIndex, endIndex, scrollTop, currentCenterIndex]);
-
-  // --- DEV MODE RENDERING ---
-  const path: TrieNode[] = [];
-  let curr: TrieNode | null = currentNodeRef.current;
-  while (curr && curr.depth > 0) {
-      path.unshift(curr);
-      curr = curr.parent;
-  }
-
-  let activeDepth = 5;
-  const absLevel = Math.abs(level);
-  if (absLevel === 2) activeDepth = 4;
-  if (absLevel === 3) activeDepth = 3;
-  if (absLevel === 4) activeDepth = 2;
-  if (absLevel >= 5) activeDepth = 1;
-
-  const rows = [];
-  let parentForNextRow = (path.length > 0 && path[0].parent) ? path[0].parent : null;
-
-  for (let i = 0; i < 5; i++) {
-     const isRowActive = (i + 1) === activeDepth;
-     let childrenToRender: TrieNode[] = [];
-     let selectedNodeInRow: TrieNode | null = null;
-     
-     if (i < path.length) {
-         selectedNodeInRow = path[i];
-         parentForNextRow = path[i];
-         childrenToRender = path[i].parent ? path[i].parent!.children : parentForNextRow?.children || [];
-     } else {
-         childrenToRender = parentForNextRow ? parentForNextRow.children : [];
-     }
-
-     if (childrenToRender.length === 0) continue;
-
-     const selectedIndex = childrenToRender.indexOf(selectedNodeInRow!);
-     const startIdx = Math.max(0, selectedIndex - 8);
-     const endIdx = Math.min(childrenToRender.length, selectedIndex + 8);
-     const visibleChildren = childrenToRender.slice(startIdx, endIdx);
-
-     rows.push(
-         <div key={`depth-${i+1}`} className={`tree-row ${isRowActive ? 'active-row' : ''}`}>
-            <div className="row-label">Depth {i+1}</div>
-            <div className="nodes-container">
-               {startIdx > 0 && <div className="more-nodes">...</div>}
-               {visibleChildren.map(child => {
-                  const isSelected = child === selectedNodeInRow;
-                  const isLeaf = child.depth === 5;
-                  return (
-                     <div key={child.prefix} className={`tree-node ${isSelected ? 'selected' : ''}`}>
-                        {isLeaf ? (
-                           <div className="leaf-content">
-                              <span className="leaf-name">{child.contact?.name}</span>
-                           </div>
-                        ) : (
-                           <span className="node-prefix">{child.prefix}</span>
-                        )}
-                        {isSelected && isRowActive && <div className="active-indicator" /> }
-                     </div>
-                  );
-               })}
-               {endIdx < childrenToRender.length && <div className="more-nodes">...</div>}
-            </div>
-            {i < 4 && <div className="branch-line"></div>}
-         </div>
-     );
-  }
+  }, [startIndex, endIndex, scrollTop, currentCenterIndex, activeData, level]);
 
   const wpm = Math.abs(Math.round(displayVelocity * 60));
-  const progress = (positionRef.current / (LIST_SIZE - 1)) * 100;
+  const progress = (positionRef.current / (listSize - 1)) * 100;
 
   return (
     <div className="lux-console-fullscreen">
-      {/* Side: Alphabet Quick-Nav */}
-      <nav className="alphabet-bar">
-        {ALPHABET.map(letter => (
-          <div key={letter} className={`alpha-letter ${letter === currentLetter ? 'active' : ''}`}>
-             {letter}
-          </div>
+      {/* Side: Metric Quick-Nav */}
+      <nav className="metrics-bar">
+        {METRICS.map(m => (
+          <button 
+             key={m} 
+             className={`metric-btn ${m === activeMetric ? 'active' : ''}`}
+             onClick={() => { setActiveMetric(m); announcerRef.current.cancel(); }}
+          >
+             {m}
+          </button>
         ))}
       </nav>
 
       {/* Main Container */}
       <div className="console-workspace">
-        
-        {/* Top: Integrated Status Bar */}
         <header className="console-header-integrated">
           <div className="brand-suite">
-            <h1 className="main-title serif-text">Acoustic <span className="accent">Drive</span></h1>
+            <h1 className="main-title serif-text">Log<span className="accent">Sonar</span></h1>
             <div className="id-strip">
-              <span className="serial">MOD-5000</span>
+              <span className="serial">SYS-LOGS</span>
               <div className="pulse-container" data-speaking={isSpeaking}>
                 <div className="pulse-bar"></div>
                 <div className="pulse-bar"></div>
@@ -331,16 +280,7 @@ export default function ListVisualizer() {
               </div>
             </div>
           </div>
-
           <div className="global-stats">
-             <div className="stat-blob">
-                <span className="label">PEAK</span>
-                <span className="value">{peakWpm}</span>
-             </div>
-             <div className="stat-blob">
-                <span className="label">ENCOUNTERS</span>
-                <span className="value">{sessionCount}</span>
-             </div>
              <div className="stat-blob linked">
                 <span className="label">SYSTEM</span>
                 <span className="value status" data-linked={audioEnabled}>
@@ -350,23 +290,20 @@ export default function ListVisualizer() {
           </div>
         </header>
 
-        {/* Workspace Body */}
         <main className="console-main-layout">
-          
           <section className="viewport-primary">
             <div className="viewport-overflow">
               <div className="focal-anchor"></div>
               {devMode ? (
                  <div className="tree-canvas">
-                    {rows}
+                    {/* Simplified Dev Mode could go here */}
+                    <div style={{color: '#888', padding: 20}}>Tree Visualization Mode (See Code)</div>
                  </div>
               ) : (
                  <div className="list-content-frame">
                    {items}
                  </div>
               )}
-              
-              {/* Discrete Progress Scrubber */}
               <div className="global-scrubber">
                 <div className="scrubber-fill" style={{ width: `${progress}%` }}></div>
               </div>
@@ -377,13 +314,12 @@ export default function ListVisualizer() {
             </footer>
           </section>
 
-          {/* Right Sidebar: Data Density */}
           <aside className="console-details">
             <div className="metric-panel pulse-aware" data-active={Math.abs(level) > 0}>
               <Gauge size={18} className="icon-gold" />
               <div className="metric-readout">
-                <span className="label">Velocity WPM</span>
-                <div className="big-num">{wpm}</div>
+                <span className="label">Velocity</span>
+                <div className="big-num">{wpm} <span style={{fontSize: '0.8rem'}}>hops/min</span></div>
                 <div className="gear-tag">G{Math.abs(level)} • {mode}</div>
               </div>
             </div>
@@ -408,35 +344,15 @@ export default function ListVisualizer() {
                />
             </div>
 
-            <div className="history-panel">
-               <div className="history-header">
-                  <History size={14} />
-                  <span>Recent Encounters</span>
-               </div>
-               <div className="history-list">
-                  {history.map((name, i) => (
-                    <div key={i} className="history-item">{name}</div>
-                  ))}
-               </div>
-            </div>
-
             <div className="system-footprint">
                <div className="foot-row">
                  <Layers size={14} />
-                 <span>List Depth: {LIST_SIZE}</span>
+                 <span>Timeline Length: {listSize}s</span>
                </div>
                <div className="foot-row">
                  <Navigation size={14} />
-                 <span>Offset: {Math.round(positionRef.current)}</span>
+                 <span>Time Index: {Math.round(positionRef.current)}s</span>
                </div>
-            </div>
-
-            <div className="config-panel toggle-dev-panel" onClick={() => setDevMode(!devMode)}>
-               <div className="cfg-header">
-                 <Network size={14} />
-                 <span>Developer Mode</span>
-               </div>
-               <div className="cfg-val status" data-linked={devMode}>{devMode ? 'ACTIVE' : 'OFF'}</div>
             </div>
           </aside>
         </main>
@@ -444,5 +360,3 @@ export default function ListVisualizer() {
     </div>
   );
 }
-
-

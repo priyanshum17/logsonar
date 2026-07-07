@@ -1,13 +1,12 @@
 import './App.css';
-import ListVisualizer from './components/ListVisualizer';
+import TimelineVisualizer from './components/TimelineVisualizer';
 
 function App() {
   return (
     <div className="app-container">
-      <ListVisualizer />
+      <TimelineVisualizer />
     </div>
   );
 }
 
 export default App;
-

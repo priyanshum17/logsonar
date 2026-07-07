@@ -43,3 +43,7 @@ h1, h2, h3, .serif-text {
   font-weight: 700;
 }
 
+#root {
+  width: 100vw;
+  height: 100vh;
+}
