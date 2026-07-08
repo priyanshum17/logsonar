@@ -1,17 +1,24 @@
 import { MetricType } from '../data/mockTimeSeries';
 
+interface AudioVoice {
+  osc?: OscillatorNode;
+  noise?: AudioBufferSourceNode;
+  filter?: BiquadFilterNode;
+  gain: GainNode;
+  panner: StereoPannerNode;
+}
+
 export class AudioEngine {
   private static instance: AudioEngine;
   private audioCtx: AudioContext | null = null;
-  private activeOsc: OscillatorNode | null = null;
-  private activeGain: GainNode | null = null;
-  private activeNoise: AudioBufferSourceNode | null = null;
-  private activeFilter: BiquadFilterNode | null = null;
+  private masterCompressor: DynamicsCompressorNode | null = null;
+  private masterGain: GainNode | null = null;
+  
+  private voices: Map<MetricType, AudioVoice> = new Map();
+  private activeMetrics: MetricType[] = [];
+  
   private synth: SpeechSynthesis;
   private isMuted: boolean = false;
-
-
-  private currentMetric: MetricType | null = null;
 
   private constructor() {
     this.synth = window.speechSynthesis;
@@ -28,6 +35,20 @@ export class AudioEngine {
     try {
       if (!this.audioCtx) {
         this.audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+        this.masterCompressor = this.audioCtx.createDynamicsCompressor();
+        
+        // Configure compressor to gracefully squash loud peaks
+        this.masterCompressor.threshold.value = -12;
+        this.masterCompressor.knee.value = 15;
+        this.masterCompressor.ratio.value = 4;
+        this.masterCompressor.attack.value = 0.01;
+        this.masterCompressor.release.value = 0.25;
+
+        this.masterGain = this.audioCtx.createGain();
+        this.masterGain.gain.value = 1.0;
+        
+        this.masterCompressor.connect(this.masterGain);
+        this.masterGain.connect(this.audioCtx.destination);
       }
       if (this.audioCtx.state === 'suspended') {
         this.audioCtx.resume().catch(console.error);
@@ -62,118 +83,152 @@ export class AudioEngine {
      return buffer;
   }
 
-  public startDriving(metric: MetricType) {
+  public startDriving(metrics: MetricType[]) {
     if (this.isMuted || !this.audioCtx || this.audioCtx.state === 'suspended') return;
-    if (this.currentMetric === metric && (this.activeOsc || this.activeNoise)) return; // Already running for this metric
     
-    this.stopDriving();
-    this.currentMetric = metric;
+    // Stop voices that are no longer requested
+    for (const metric of this.voices.keys()) {
+      if (!metrics.includes(metric)) {
+        this.stopVoice(metric);
+      }
+    }
     
+    this.activeMetrics = [...metrics];
     const now = this.audioCtx.currentTime;
     
-    if (metric === 'Latency') {
-       const noiseSource = this.audioCtx.createBufferSource();
-       noiseSource.buffer = this.createNoiseBuffer();
-       noiseSource.loop = true;
-       
-       const filter = this.audioCtx.createBiquadFilter();
-       filter.type = 'lowpass';
-       filter.frequency.setValueAtTime(200, now);
-       
-       const gainNode = this.audioCtx.createGain();
-       gainNode.gain.setValueAtTime(0.01, now); // start silent
-       
-       noiseSource.connect(filter);
-       filter.connect(gainNode);
-       gainNode.connect(this.audioCtx.destination);
-       
-       noiseSource.start(now);
-       this.activeNoise = noiseSource;
-       this.activeFilter = filter;
-       this.activeGain = gainNode;
-    } else {
-       const osc = this.audioCtx.createOscillator();
-       const gainNode = this.audioCtx.createGain();
-       
-       // Use smoother waveforms to avoid harshness
-       if (metric === 'CPU') osc.type = 'sine';
-       else if (metric === 'Memory') osc.type = 'triangle';
-       else if (metric === 'Network') osc.type = 'sine';
-       else if (metric === 'Disk') osc.type = 'triangle';
-       else if (metric === 'ErrorRate') osc.type = 'sine'; 
-       
-       osc.frequency.setValueAtTime(200, now);
-       gainNode.gain.setValueAtTime(0.01, now); // start silent
-       
-       osc.connect(gainNode);
-       gainNode.connect(this.audioCtx.destination);
-       
-       osc.start(now);
-       this.activeOsc = osc;
-       this.activeGain = gainNode;
+    for (const metric of metrics) {
+      if (this.voices.has(metric)) continue; // Already running
+      
+      const panner = this.audioCtx.createStereoPanner();
+      if (metric === 'CPU') panner.pan.value = -0.6; // Hard left
+      else if (metric === 'Memory') panner.pan.value = 0.6; // Hard right
+      else if (metric === 'Disk') panner.pan.value = -0.3;
+      else if (metric === 'Network') panner.pan.value = 0.3;
+      else panner.pan.value = 0; // Center for Latency, ErrorRate
+      
+      panner.connect(this.masterCompressor!);
+      
+      const gainNode = this.audioCtx.createGain();
+      gainNode.gain.setValueAtTime(0.001, now);
+      gainNode.connect(panner);
+      
+      const voice: AudioVoice = { gain: gainNode, panner };
+      
+      if (metric === 'Latency') {
+         const noiseSource = this.audioCtx.createBufferSource();
+         noiseSource.buffer = this.createNoiseBuffer();
+         noiseSource.loop = true;
+         
+         const filter = this.audioCtx.createBiquadFilter();
+         filter.type = 'lowpass';
+         filter.frequency.setValueAtTime(200, now);
+         
+         noiseSource.connect(filter);
+         filter.connect(gainNode);
+         
+         noiseSource.start(now);
+         voice.noise = noiseSource;
+         voice.filter = filter;
+      } else {
+         const osc = this.audioCtx.createOscillator();
+         if (metric === 'CPU') osc.type = 'sine';
+         else if (metric === 'Memory') osc.type = 'triangle';
+         else if (metric === 'Network') osc.type = 'sawtooth';
+         else if (metric === 'Disk') osc.type = 'square';
+         else if (metric === 'ErrorRate') osc.type = 'sine'; 
+         
+         osc.frequency.setValueAtTime(200, now);
+         osc.connect(gainNode);
+         osc.start(now);
+         voice.osc = osc;
+      }
+      
+      this.voices.set(metric, voice);
     }
   }
   
-  public updateDriving(value: number, speed: number) {
+  public updateDriving(values: Record<MetricType, number>, speed: number) {
     if (!this.audioCtx || this.isMuted || speed === 0) {
        this.stopDriving();
        return;
     }
     
-    if (!this.activeGain) return;
-    
     const now = this.audioCtx.currentTime;
     
-    if (this.currentMetric === 'Latency' && this.activeFilter) {
-       const freq = 200 + (value * 1200); 
-       const vol = 0.02 + (value * 0.15); 
-       this.activeFilter.frequency.setTargetAtTime(freq, now, 0.05);
-       this.activeGain.gain.setTargetAtTime(vol, now, 0.05);
-    } else if (this.activeOsc) {
-       if (this.currentMetric === 'ErrorRate') {
-          const freq = 400 + (value * 800);
-          this.activeOsc.frequency.setTargetAtTime(freq, now, 0.05);
-          const vol = 0.02 + (value * 0.2);
-          this.activeGain.gain.setTargetAtTime(vol, now, 0.05);
-       } else {
-          const freq = 200 + (value * 600);
-          const vol = 0.02 + (value * 0.15);
-          this.activeOsc.frequency.setTargetAtTime(freq, now, 0.05);
-          this.activeGain.gain.setTargetAtTime(vol, now, 0.05);
+    for (const metric of this.activeMetrics) {
+       const voice = this.voices.get(metric);
+       if (!voice) continue;
+       
+       const value = values[metric] || 0;
+       
+       if (metric === 'Latency' && voice.filter) {
+          const freq = 200 + (value * 2000); 
+          const vol = 0.02 + (value * 0.15); 
+          voice.filter.frequency.setTargetAtTime(freq, now, 0.05);
+          voice.gain.gain.setTargetAtTime(vol, now, 0.05);
+       } else if (voice.osc) {
+          if (metric === 'CPU') {
+             // Low band foundation
+             const freq = 100 + (value * 200); 
+             const vol = 0.02 + (value * 0.15);
+             voice.osc.frequency.setTargetAtTime(freq, now, 0.05);
+             voice.gain.gain.setTargetAtTime(vol, now, 0.05);
+          } else if (metric === 'Memory') {
+             // Mid-high piercing band
+             const freq = 600 + (value * 800);
+             const vol = 0.02 + (value * 0.1);
+             voice.osc.frequency.setTargetAtTime(freq, now, 0.05);
+             voice.gain.gain.setTargetAtTime(vol, now, 0.05);
+          } else if (metric === 'ErrorRate') {
+             // Dissonant AM simulation
+             const freq = 400 + (value * 1200);
+             const vol = 0.02 + (value * 0.2);
+             voice.osc.frequency.setTargetAtTime(freq, now, 0.05);
+             voice.gain.gain.setTargetAtTime(vol, now, 0.05);
+          } else {
+             // Default mapping
+             const freq = 200 + (value * 600);
+             const vol = 0.02 + (value * 0.15);
+             voice.osc.frequency.setTargetAtTime(freq, now, 0.05);
+             voice.gain.gain.setTargetAtTime(vol, now, 0.05);
+          }
        }
     }
   }
 
-  public stopDriving() {
-    this.currentMetric = null;
-    if (this.activeOsc) {
-      try { this.activeOsc.stop(); } catch(e) {}
-      this.activeOsc.disconnect();
-      this.activeOsc = null;
+  private stopVoice(metric: MetricType) {
+    const voice = this.voices.get(metric);
+    if (!voice) return;
+    
+    if (voice.osc) {
+      try { voice.osc.stop(); } catch(e) {}
+      voice.osc.disconnect();
     }
-    if (this.activeGain) {
-      if (this.audioCtx && this.activeGain.gain) {
-        this.activeGain.gain.cancelScheduledValues(this.audioCtx.currentTime);
-        this.activeGain.gain.setValueAtTime(this.activeGain.gain.value, this.audioCtx.currentTime);
-        this.activeGain.gain.linearRampToValueAtTime(0.01, this.audioCtx.currentTime + 0.05);
-      }
-      const gainToStop = this.activeGain;
-      this.activeGain = null;
-      setTimeout(() => {
-        gainToStop.disconnect();
+    if (voice.noise) {
+      try { voice.noise.stop(); } catch(e) {}
+      voice.noise.disconnect();
+    }
+    if (voice.filter) voice.filter.disconnect();
+    
+    if (voice.gain && this.audioCtx) {
+      const g = voice.gain;
+      g.gain.cancelScheduledValues(this.audioCtx.currentTime);
+      g.gain.setValueAtTime(g.gain.value, this.audioCtx.currentTime);
+      g.gain.linearRampToValueAtTime(0.001, this.audioCtx.currentTime + 0.05);
+      setTimeout(() => { 
+          g.disconnect(); 
+          voice.panner.disconnect(); 
       }, 50);
     }
-    if (this.activeNoise) {
-       try { this.activeNoise.stop(); } catch(e) {}
-       this.activeNoise.disconnect();
-       this.activeNoise = null;
-    }
-    if (this.activeFilter) {
-       this.activeFilter.disconnect();
-       this.activeFilter = null;
-    }
+    this.voices.delete(metric);
   }
 
+  public stopDriving() {
+    this.activeMetrics = [];
+    for (const metric of Array.from(this.voices.keys())) {
+       this.stopVoice(metric);
+    }
+  }
 
   public speakLog(message: string, onEnd?: () => void): boolean {
     if (this.isMuted) {
