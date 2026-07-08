@@ -155,43 +155,55 @@ export class AudioEngine {
     
     const now = this.audioCtx.currentTime;
     
+    // 1. Calculate Salience (find the most anomalous metric currently playing)
+    let maxSalience = 0;
+    for (const metric of this.activeMetrics) {
+       if ((values[metric] || 0) > maxSalience) {
+           maxSalience = values[metric] || 0;
+       }
+    }
+    
     for (const metric of this.activeMetrics) {
        const voice = this.voices.get(metric);
        if (!voice) continue;
        
        const value = values[metric] || 0;
        
+       // 2. Dynamic Masking Mitigation (Auditory Spotlight)
+       // If there is a major anomaly (maxSalience > 0.3) and we are polyphonic,
+       // we aggressively duck the volume of the non-anomalous streams.
+       let focusMultiplier = 1.0;
+       if (this.activeMetrics.length > 1 && maxSalience > 0.3) {
+           const distanceToMax = maxSalience - value;
+           // The further a metric is from the peak anomaly, the quieter it gets (down to 10% volume)
+           focusMultiplier = Math.max(0.1, 1.0 - (distanceToMax * 2.5));
+       }
+       
        if (metric === 'Latency' && voice.filter) {
           const freq = 200 + (value * 2000); 
-          const vol = 0.02 + (value * 0.15); 
+          const vol = (0.02 + (value * 0.15)) * focusMultiplier; 
           voice.filter.frequency.setTargetAtTime(freq, now, 0.05);
           voice.gain.gain.setTargetAtTime(vol, now, 0.05);
        } else if (voice.osc) {
+          let freq = 0;
+          let vol = 0;
+          
           if (metric === 'CPU') {
-             // Low band foundation
-             const freq = 100 + (value * 200); 
-             const vol = 0.02 + (value * 0.15);
-             voice.osc.frequency.setTargetAtTime(freq, now, 0.05);
-             voice.gain.gain.setTargetAtTime(vol, now, 0.05);
+             freq = 100 + (value * 200); 
+             vol = (0.02 + (value * 0.15)) * focusMultiplier;
           } else if (metric === 'Memory') {
-             // Mid-high piercing band
-             const freq = 600 + (value * 800);
-             const vol = 0.02 + (value * 0.1);
-             voice.osc.frequency.setTargetAtTime(freq, now, 0.05);
-             voice.gain.gain.setTargetAtTime(vol, now, 0.05);
+             freq = 600 + (value * 800);
+             vol = (0.02 + (value * 0.1)) * focusMultiplier;
           } else if (metric === 'ErrorRate') {
-             // Dissonant AM simulation
-             const freq = 400 + (value * 1200);
-             const vol = 0.02 + (value * 0.2);
-             voice.osc.frequency.setTargetAtTime(freq, now, 0.05);
-             voice.gain.gain.setTargetAtTime(vol, now, 0.05);
+             freq = 400 + (value * 1200);
+             vol = (0.02 + (value * 0.2)) * focusMultiplier;
           } else {
-             // Default mapping
-             const freq = 200 + (value * 600);
-             const vol = 0.02 + (value * 0.15);
-             voice.osc.frequency.setTargetAtTime(freq, now, 0.05);
-             voice.gain.gain.setTargetAtTime(vol, now, 0.05);
+             freq = 200 + (value * 600);
+             vol = (0.02 + (value * 0.15)) * focusMultiplier;
           }
+          
+          voice.osc.frequency.setTargetAtTime(freq, now, 0.05);
+          voice.gain.gain.setTargetAtTime(vol, now, 0.05);
        }
     }
   }
