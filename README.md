@@ -1,58 +1,51 @@
-# CS 8903: High-Speed Audio-First Data Exploration
+# LogSonar
 
-This project explores the optimization of non-visual data navigation through large, sorted lists. Current screen reader technology often relies on linear, one-by-one item iteration, which becomes increasingly inefficient as dataset sizes grow. This research proposes and implements a **Velocity-Adaptive Audio (VAA)** model that treats navigation as a physics-based "shuttling" experience.
+**LogSonar** is an advanced, eyes-free auditory telemetry and system monitoring interface designed specifically for software engineers. It enables developers to monitor complex microservice infrastructure, track error rates, and identify server anomalies using an innovative **Velocity-Adaptive Audio** engine.
 
-## Research Objective
-The goal is to minimize **Time-to-Target** for visually impaired users by mapping scroll velocity to audio density. By utilizing structural landmarks (alphabetical boundaries) and synthesized auditory feedback, the system allows users to "scan" thousands of entries in seconds.
+## Overview
 
-## The Accelerator Metaphor
-Navigation is implemented using a "gear-based" physics engine where the user controls velocity rather than individual item selection:
-- **Accelerate (W)**: Increases the scroll velocity (Gears 1-6).
-- **Brake/Reverse (S)**: Decelerates or reverses the scroll direction.
-- **Hard Stop (A)**: Immediately halts all motion.
+As digital environments and infrastructure dashboards become increasingly complex, engineers often experience visual fatigue. They are forced to actively monitor graphs while simultaneously focusing on high-demand tasks (e.g., writing code or debugging).
 
-## Velocity-Adaptive Audio (VAA) Model
-The system dynamically mutates the audio output based on the current navigation speed to prevent cognitive overload while maintaining spatial awareness:
+LogSonar solves this by shifting telemetry data into the auditory channel. Utilizing the Web Audio API and Web Speech API, LogSonar allows users to scrub through dense time-series server logs and hear anomalies as continuous synthesizer modulations, dropping down to granular, text-to-speech log readouts when precision is required.
 
-- **Low Velocity (Gears 1-2)**: High-fidelity output. The engine announces the full "LastName, FirstName" of entries.
-- **Medium Velocity (Gear 3)**: Adaptive simplification. The engine announces only the "LastName" and plays audio ticks for every 5 entries.
-- **High Velocity (Gears 4-6)**: Structural landmarks. The engine announces only the current alphabetical section (e.g., "A", "B", "C") and plays high-frequency ticks for every crossing.
+## Features
 
-## Core Components
-
-The system consists of the following technical components:
-
-*   **Acoustic Drive Engine**: A singleton manager utilizing the Web Speech API and Web Audio API for coordinated feedback.
-*   **Alphabet Quick-Nav**: A vertical structural map providing real-time section tracking across thousand-entry datasets.
-*   **Voice Pulse**: A visual telemetry indicator showing auditory data bursts for multi-modal verification.
-*   **Encounter Ticker**: A real-time history log of the most recently traversed entries for data validation.
+- **Velocity-Adaptive Sonification (Gears 2-5):** At high scrubbing speeds, LogSonar converts dense time-series data into continuous audio signals (sine, triangle, and filtered noise) representing metrics like CPU Utilization, Memory, Network I/O, Disk I/O, Error Rates, and Latency.
+- **"Karaoke" Log Reading (Gear 1):** At the most granular level, the system pauses timeline traversal to clearly read the exact text of the log statement using Text-to-Speech (TTS). It guarantees perfect audio-visual synchronization by intelligently pausing the timeline exactly when the utterance begins and resuming the exact millisecond it finishes.
+- **Elastic Braking:** Rapid deceleration and hard stops ensure developers can quickly zero in on an anomaly the moment they hear an auditory spike.
+- **Boundary Auto-Braking:** Automatic safety bounds prevent the scrubber from flying off the end of the timeline, enforcing a clean hard stop.
+- **Visual Validation Dashboard:** A beautiful, real-time React/Recharts UI plots the active telemetry signal with dynamic domain tracking, providing visual feedback to match the auditory experience.
 
 ## Getting Started
-```bash
-# Clone the repository
-git clone https://github.com/priyanshumehta/acoustic-drive.git
 
-# Install dependencies
-npm install
+### Prerequisites
+- Node.js (v16+)
+- npm or yarn
 
-# Start the environment
-npm run dev
-```
+### Installation
+1. Clone the repository:
+   ```bash
+   git clone https://github.com/priyanshum17/logsonar.git
+   cd logsonar
+   ```
+2. Install dependencies:
+   ```bash
+   npm install
+   ```
+3. Start the development server:
+   ```bash
+   npm run dev
+   ```
 
-## Research Foundations
-The Acoustic Drive System is built upon core principles of Human-Computer Interaction and Auditory Display. Key inspirations include:
-*   **Spearcons**: Developed by the Georgia Tech Sonification Lab for high-speed menu navigation.
-*   **Velocity-Adaptive Audio**: Our model for mapping interaction speed to auditory granularity.
+### Usage
+- Use the **W** (Accelerate) and **S** (Reverse) keys to shift gears.
+- Use **A** to trigger an immediate Hard Stop.
+- Observe the auditory response and the visual playhead as you move through the dataset.
+- Drop down to **Level 1** (or Level -1) to engage granular log-reading mode.
 
-Detailed research analysis can be found in the documentation:
-*   [Literature Review](docs/literature_review.md): A summary of academic papers on Spearcons, Earcons, and Shuttling.
-*   [Research Application](docs/research_application.md): A mapping of academic findings to the specific implementation in this codebase.
+## Research & Academic Use
 
-## Technical Documentation
-Detailed specifications and implementation details can be found in the `/docs` directory:
-- [Design Specifications](docs/design.md)
-- [Functional Breakdown & Screenshots](docs/screenshots.md)
-- [Initial Research Notes](docs/research.md)
+This software was developed in part to study the efficacy of eyes-free interfaces and cognitive load reduction in telemetry scenarios. For inquiries regarding human-computer interaction (HCI) studies using LogSonar, please refer to the internal IRB documentation.
 
----
-*CS 8903 Special Problems | Spring 2026*
+## License
+MIT License
