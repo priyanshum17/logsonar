@@ -9,22 +9,12 @@ export class AudioEngine {
   private activeFilter: BiquadFilterNode | null = null;
   private synth: SpeechSynthesis;
   private isMuted: boolean = false;
-  private activeVoice: SpeechSynthesisVoice | null = null;
+
 
   private currentMetric: MetricType | null = null;
 
   private constructor() {
     this.synth = window.speechSynthesis;
-    const populateVoices = () => {
-       const voices = this.synth.getVoices();
-       if (voices.length > 0) {
-          this.activeVoice = voices.find(v => v.name.includes('Premium') || v.name.includes('Google') || v.lang.startsWith('en')) || voices[0];
-       }
-    };
-    populateVoices();
-    if (this.synth.onvoiceschanged !== undefined) {
-       this.synth.onvoiceschanged = populateVoices;
-    }
   }
 
   public static getInstance(): AudioEngine {
@@ -42,9 +32,8 @@ export class AudioEngine {
       if (this.audioCtx.state === 'suspended') {
         this.audioCtx.resume().catch(console.error);
       }
-      this.cancel();
+      
       const utterance = new SpeechSynthesisUtterance("System Online");
-      if (this.activeVoice) utterance.voice = this.activeVoice;
       this.synth.speak(utterance);
     } catch(e) {
       console.error("Audio Initialization Error", e);
@@ -52,8 +41,14 @@ export class AudioEngine {
   }
 
   public cancel() {
-    this.synth.cancel();
+    this.clearSpeech();
     this.stopDriving();
+  }
+  
+  public clearSpeech() {
+    if (this.synth.speaking || this.synth.pending) {
+      this.synth.cancel();
+    }
   }
   
   private createNoiseBuffer(): AudioBuffer {
@@ -100,11 +95,12 @@ export class AudioEngine {
        const osc = this.audioCtx.createOscillator();
        const gainNode = this.audioCtx.createGain();
        
+       // Use smoother waveforms to avoid harshness
        if (metric === 'CPU') osc.type = 'sine';
-       else if (metric === 'Memory') osc.type = 'square';
-       else if (metric === 'Network') osc.type = 'sawtooth';
+       else if (metric === 'Memory') osc.type = 'triangle';
+       else if (metric === 'Network') osc.type = 'sine';
        else if (metric === 'Disk') osc.type = 'triangle';
-       else if (metric === 'ErrorRate') osc.type = 'square'; 
+       else if (metric === 'ErrorRate') osc.type = 'sine'; 
        
        osc.frequency.setValueAtTime(200, now);
        gainNode.gain.setValueAtTime(0.01, now); // start silent
@@ -127,24 +123,23 @@ export class AudioEngine {
     if (!this.activeGain) return;
     
     const now = this.audioCtx.currentTime;
-    const smoothTime = now + 0.1; // Smooth out changes slightly
     
     if (this.currentMetric === 'Latency' && this.activeFilter) {
-       const freq = 200 + (value * 1800);
-       const vol = 0.05 + (value * 0.5); // base volume + anomaly swell
-       this.activeFilter.frequency.linearRampToValueAtTime(freq, smoothTime);
-       this.activeGain.gain.linearRampToValueAtTime(vol, smoothTime);
+       const freq = 200 + (value * 1200); 
+       const vol = 0.02 + (value * 0.15); 
+       this.activeFilter.frequency.setTargetAtTime(freq, now, 0.05);
+       this.activeGain.gain.setTargetAtTime(vol, now, 0.05);
     } else if (this.activeOsc) {
        if (this.currentMetric === 'ErrorRate') {
-          const freq = 800 + (value * 1000);
-          this.activeOsc.frequency.linearRampToValueAtTime(freq, smoothTime);
-          const vol = 0.05 + (value * 0.5);
-          this.activeGain.gain.linearRampToValueAtTime(vol, smoothTime);
+          const freq = 400 + (value * 800);
+          this.activeOsc.frequency.setTargetAtTime(freq, now, 0.05);
+          const vol = 0.02 + (value * 0.2);
+          this.activeGain.gain.setTargetAtTime(vol, now, 0.05);
        } else {
-          const freq = 200 + (value * 800);
-          const vol = 0.05 + (value * 0.5);
-          this.activeOsc.frequency.linearRampToValueAtTime(freq, smoothTime);
-          this.activeGain.gain.linearRampToValueAtTime(vol, smoothTime);
+          const freq = 200 + (value * 600);
+          const vol = 0.02 + (value * 0.15);
+          this.activeOsc.frequency.setTargetAtTime(freq, now, 0.05);
+          this.activeGain.gain.setTargetAtTime(vol, now, 0.05);
        }
     }
   }
@@ -158,12 +153,14 @@ export class AudioEngine {
     }
     if (this.activeGain) {
       if (this.audioCtx && this.activeGain.gain) {
+        this.activeGain.gain.cancelScheduledValues(this.audioCtx.currentTime);
         this.activeGain.gain.setValueAtTime(this.activeGain.gain.value, this.audioCtx.currentTime);
         this.activeGain.gain.linearRampToValueAtTime(0.01, this.audioCtx.currentTime + 0.05);
       }
+      const gainToStop = this.activeGain;
+      this.activeGain = null;
       setTimeout(() => {
-        if (this.activeGain) this.activeGain.disconnect();
-        this.activeGain = null;
+        gainToStop.disconnect();
       }, 50);
     }
     if (this.activeNoise) {
@@ -178,18 +175,24 @@ export class AudioEngine {
   }
 
 
-  public speakLog(message: string): boolean {
-    if (this.isMuted) return false;
-    this.synth.cancel();
+  public speakLog(message: string, onEnd?: () => void): boolean {
+    if (this.isMuted) {
+      if (onEnd) onEnd();
+      return false;
+    }
     
     try {
+      console.log(`AudioEngine: Directly speaking -> "${message}"`);
       const utterance = new SpeechSynthesisUtterance(message);
-      if (this.activeVoice) utterance.voice = this.activeVoice;
-      utterance.rate = 1.0;
-      utterance.volume = 1.0;
+      if (onEnd) {
+        utterance.onend = () => { console.log("AudioEngine: Finished speaking"); onEnd(); };
+        utterance.onerror = (e) => { console.error("AudioEngine Speech Error:", e); onEnd(); };
+      }
       this.synth.speak(utterance);
       return true;
     } catch(e) {
+      console.error("AudioEngine Error:", e);
+      if (onEnd) onEnd();
       return false;
     }
   }

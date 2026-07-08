@@ -1,16 +1,15 @@
 import { useEffect, useRef, useState, useMemo } from 'react';
 import { MOCK_TIME_SERIES, MetricType, METRICS } from '../data/mockTimeSeries';
 import { AudioEngine } from '../engine/AudioEngine';
-import { TrieNavigator, TrieNode } from '../engine/TrieNavigator';
 import DriveControls from './DriveControls';
-import { Activity, Gauge, Navigation, Layers, Clock } from 'lucide-react';
+import { Activity, Navigation, Layers, Clock, PanelRightClose, PanelRightOpen } from 'lucide-react';
+import { AreaChart, Area, XAxis, ResponsiveContainer, ReferenceLine } from 'recharts';
 import './TimelineVisualizer.css';
 
 const ITEM_HEIGHT = 80;
 const VISIBLE_COUNT = 15;
 const MAX_LEVEL = 5;
 
-// Formatting helper
 const formatTime = (seconds: number) => {
   const m = Math.floor(seconds / 60);
   const s = seconds % 60;
@@ -23,250 +22,264 @@ export default function TimelineVisualizer() {
   const [baseSpeed, setBaseSpeed] = useState(0.5);
   const [audioEnabled, setAudioEnabled] = useState(false);
   const [displayVelocity, setDisplayVelocity] = useState(0);
-  const [devMode] = useState(false);
-  
+
   const [activeMetric, setActiveMetric] = useState<MetricType>('CPU');
-  
   const [isSpeaking, setIsSpeaking] = useState(false);
-  
-  const trieNavigator = useMemo(() => new TrieNavigator(), []);
-  const currentNodeRef = useRef<TrieNode>(trieNavigator.getLeafAt(0));
-  const clutchUntilRef = useRef<number>(0);
-  const hopProgressRef = useRef(0);
-  const targetLinearIndexRef = useRef(0);
-  
+  const [isDetailsOpen, setIsDetailsOpen] = useState(false);
+
+  const [activeTimeRange, setActiveTimeRange] = useState({ start: -30, end: 30 });
+  const [playheadIndex, setPlayheadIndex] = useState(0);
+  const lastSpokenIndexRef = useRef(-1);
+
   const positionRef = useRef(0);
   const [scrollTop, setScrollTop] = useState(0);
   const lastTimeRef = useRef<number>(performance.now());
   const announcerRef = useRef(AudioEngine.getInstance());
 
   const activeData = MOCK_TIME_SERIES[activeMetric];
-  const listSize = trieNavigator.leaves.length;
+  const listSize = activeData.length;
+
+  const prevLevelRef = useRef(level);
+  const isSpeakingRef = useRef(false);
+  
+  useEffect(() => {
+    if (prevLevelRef.current !== level) {
+      announcerRef.current.clearSpeech();
+      isSpeakingRef.current = false;
+      setIsSpeaking(false);
+      prevLevelRef.current = level;
+    }
+  }, [level]);
 
   useEffect(() => {
     if (audioEnabled) return;
     const unlock = () => {
-       announcerRef.current.init();
-       setAudioEnabled(true);
+      announcerRef.current.init();
+      setAudioEnabled(true);
     };
     window.addEventListener('keydown', unlock, { once: true });
     window.addEventListener('pointerdown', unlock, { once: true });
     return () => {
-       window.removeEventListener('keydown', unlock);
-       window.removeEventListener('pointerdown', unlock);
+      window.removeEventListener('keydown', unlock);
+      window.removeEventListener('pointerdown', unlock);
     };
   }, [audioEnabled]);
 
   useEffect(() => {
     let reqId: number;
-    let speakTimer: any;
 
     const loop = (time: number) => {
-      const dt = (time - lastTimeRef.current) / 1000; 
+      const dt = (time - lastTimeRef.current) / 1000;
       lastTimeRef.current = time;
-      
+
       let velocity = 0;
       if (level !== 0) {
         const sign = Math.sign(level);
         const absLevel = Math.abs(level);
         if (mode === 'linear') {
-           velocity = sign * (absLevel * baseSpeed);
+          velocity = sign * (absLevel * baseSpeed);
         } else {
-           velocity = sign * baseSpeed * Math.pow(1.8, absLevel - 1);
+          velocity = sign * baseSpeed * Math.pow(1.8, absLevel - 1);
         }
       }
-      
+
       if (Math.abs(velocity) !== Math.abs(displayVelocity)) {
-          setDisplayVelocity(velocity);
+        setDisplayVelocity(velocity);
       }
-      
+
+      const absLevel = Math.abs(level);
+      let timeScale = 1;
+      let lookahead = 1;
+      let graphWindow = 600;
+
+      if (absLevel === 0) {
+        graphWindow = 60;
+      } else if (absLevel === 1) {
+        timeScale = 1; lookahead = 1; graphWindow = 20;
+      } else if (absLevel === 2) {
+        timeScale = 5; lookahead = 5; graphWindow = 60;
+      } else if (absLevel === 3) {
+        timeScale = 15; lookahead = 15; graphWindow = 120;
+      } else if (absLevel === 4) {
+        timeScale = 30; lookahead = 30; graphWindow = 300;
+      } else if (absLevel === 5) {
+        timeScale = 60; lookahead = 60; graphWindow = 600;
+      }
+
       if (level !== 0) {
-         if (audioEnabled) {
-            announcerRef.current.startDriving(activeMetric);
-         }
-         
-         const sign = Math.sign(level);
-         const absLevel = Math.abs(level);
-         
-         // 1. Shift Gears (Vertical movement in Trie)
-         // Level 1 = Gear 1 (Depth 5). Level 5 = Gear 5 (Depth 1).
-         let targetDepth = 6 - absLevel; 
-         
-         if (currentNodeRef.current.depth > targetDepth) {
-            currentNodeRef.current = currentNodeRef.current.getAncestorAtDepth(targetDepth);
-         } else if (currentNodeRef.current.depth < targetDepth) {
-            let curr = currentNodeRef.current;
-            while (curr.depth < targetDepth && curr.children.length > 0) {
-               curr = curr.children[0];
-            }
-            currentNodeRef.current = curr;
-         }
-         
-         // 2. Horizontal Hopping
-         let hopRate = baseSpeed;
-         if (time > clutchUntilRef.current) {
-             hopProgressRef.current += hopRate * dt;
-         }
-         
-         let hopped = false;
-         while (hopProgressRef.current >= 1) {
-             hopProgressRef.current -= 1;
-             let nextNode = sign > 0 ? currentNodeRef.current.nextSibling : currentNodeRef.current.prevSibling;
-             if (nextNode) {
-                 currentNodeRef.current = nextNode;
-                 hopped = true;
-             }
-         }
-         
-         // 3. Audio & UI side effects
-         if (audioEnabled) {
-             const currentIndex = Math.floor(positionRef.current);
-             if (currentIndex >= 0 && currentIndex < listSize) {
-                 const logEv = activeData[currentIndex];
-                 if (logEv && targetDepth < 5) {
-                    announcerRef.current.updateDriving(logEv.value, Math.abs(velocity));
-                 }
-             }
-
-             if (hopped) {
-                 setIsSpeaking(true);
-                 clearTimeout(speakTimer);
-                 speakTimer = setTimeout(() => setIsSpeaking(false), 200);
-
-                 if (targetDepth === 5) { // Level 1 (Leaves)
-                    const logEv = activeData[currentNodeRef.current.startTime];
-                    if (logEv) {
-                       announcerRef.current.stopDriving();
-                       announcerRef.current.speakLog(logEv.message);
-                    }
-                 }
-             }
-         }
-      } else {
-         if (audioEnabled) {
-            announcerRef.current.stopDriving();
-         }
+        const sign = Math.sign(level);
+        const effectiveTimeScale = (absLevel === 1 && isSpeakingRef.current) ? 0 : timeScale;
+        const newPos = positionRef.current + sign * effectiveTimeScale * baseSpeed * dt;
+        if (newPos <= 0 || newPos >= listSize - 1) {
+            setLevel(0);
+            announcerRef.current.clearSpeech();
+            isSpeakingRef.current = false;
+            setIsSpeaking(false);
+        }
+        positionRef.current = Math.max(0, Math.min(listSize - 1, newPos));
       }
-      
-      // 4. Update target linear index for smooth scrolling
-      targetLinearIndexRef.current = currentNodeRef.current.depth === 5 
-        ? currentNodeRef.current.linearIndex 
-        : currentNodeRef.current.getFirstLeaf().linearIndex;
 
-      // 5. Smooth visual interpolation
-      const diff = targetLinearIndexRef.current - positionRef.current;
-      positionRef.current += diff * 15 * dt; 
-      if (Math.abs(diff) < 0.05) positionRef.current = targetLinearIndexRef.current;
+      let domainStart = positionRef.current - graphWindow / 2;
+      let domainEnd = positionRef.current + graphWindow / 2;
       
+      if (domainStart < 0) {
+        domainStart = 0;
+        domainEnd = Math.min(listSize - 1, graphWindow);
+      } else if (domainEnd > listSize - 1) {
+        domainEnd = listSize - 1;
+        domainStart = Math.max(0, domainEnd - graphWindow);
+      }
+
+      if (Math.abs(domainStart - activeTimeRange.start) > 0.1 || Math.abs(domainEnd - activeTimeRange.end) > 0.1) {
+        setActiveTimeRange({ start: domainStart, end: domainEnd });
+      }
+
+      if (audioEnabled) {
+        if (level !== 0) {
+          if (absLevel > 1) {
+            announcerRef.current.startDriving(activeMetric);
+          } else {
+            announcerRef.current.stopDriving();
+          }
+
+          const currentIndex = Math.round(positionRef.current);
+          if (currentIndex >= 0 && currentIndex < listSize) {
+            const endIdx = Math.min(listSize, currentIndex + lookahead);
+            const windowData = activeData.slice(currentIndex, endIdx);
+            if (windowData.length > 0) {
+              const maxVal = Math.max(...windowData.map(d => d.value));
+              const avgVal = windowData.reduce((sum, d) => sum + d.value, 0) / windowData.length;
+              const condensedValue = (avgVal * 0.4) + (maxVal * 0.6);
+
+              if (absLevel > 1) {
+                announcerRef.current.updateDriving(condensedValue, Math.abs(velocity));
+              }
+            }
+
+            if (absLevel === 1) {
+              if (currentIndex !== lastSpokenIndexRef.current) {
+                lastSpokenIndexRef.current = currentIndex;
+                const logEv = activeData[currentIndex];
+                if (logEv) {
+                  announcerRef.current.stopDriving();
+                  
+                  isSpeakingRef.current = true;
+                  setIsSpeaking(true);
+                  
+                  announcerRef.current.speakLog(logEv.message, () => {
+                    isSpeakingRef.current = false;
+                    setIsSpeaking(false);
+                  });
+                }
+              }
+            } else {
+              lastSpokenIndexRef.current = -1;
+            }
+          }
+        } else {
+          announcerRef.current.stopDriving();
+          lastSpokenIndexRef.current = -1;
+        }
+      }
+
+      const newPlayheadIndex = Math.round(positionRef.current);
+      if (newPlayheadIndex !== playheadIndex) {
+        setPlayheadIndex(newPlayheadIndex);
+      }
+
       setScrollTop(positionRef.current * ITEM_HEIGHT);
       reqId = requestAnimationFrame(loop);
     };
     reqId = requestAnimationFrame(loop);
     return () => {
       cancelAnimationFrame(reqId);
-      clearTimeout(speakTimer);
     };
-  }, [level, mode, audioEnabled, baseSpeed, displayVelocity, activeMetric, activeData]);
-  
-  // Keyboard Bindings
+  }, [level, mode, audioEnabled, baseSpeed, displayVelocity, activeMetric, activeData, activeTimeRange, playheadIndex]);
+
   useEffect(() => {
-     const onKeyDown = (e: KeyboardEvent) => {
-        if (!audioEnabled) return; 
-        if (e.key === 'w' || e.key === 'W') {
-           setLevel(prev => {
-              clutchUntilRef.current = performance.now() + 2000;
-              return Math.min(prev + 1, MAX_LEVEL);
-           });
-        } else if (e.key === 's' || e.key === 'S') {
-           setLevel(prev => {
-              clutchUntilRef.current = performance.now() + 2000;
-              return Math.max(prev - 1, -MAX_LEVEL);
-           });
-        } else if (e.key === 'a' || e.key === 'A') {
-           setLevel(0);
-           announcerRef.current.cancel();
-        }
-     };
-     window.addEventListener('keydown', onKeyDown);
-     return () => window.removeEventListener('keydown', onKeyDown);
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (!audioEnabled) return;
+      if (e.key === 'w' || e.key === 'W') {
+        setLevel(prev => Math.min(prev + 1, MAX_LEVEL));
+      } else if (e.key === 's' || e.key === 'S') {
+        setLevel(prev => Math.max(prev - 1, -MAX_LEVEL));
+      } else if (e.key === 'a' || e.key === 'A') {
+        setLevel(0);
+        announcerRef.current.cancel();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
   }, [audioEnabled]);
 
-  const currentCenterIndex = Math.floor(positionRef.current + 0.5);
-
-  const startIndex = Math.max(0, currentCenterIndex - Math.floor(VISIBLE_COUNT/2));
+  const startIndex = Math.max(0, playheadIndex - Math.floor(VISIBLE_COUNT / 2));
   const endIndex = Math.min(listSize - 1, startIndex + VISIBLE_COUNT);
-  
+
   const items = useMemo(() => {
     const list = [];
-    
-    let activeDepth = 5;
     const absLevel = Math.abs(level);
-    if (absLevel > 0) activeDepth = 6 - absLevel;
-    
-    // Determine the active range based on the current node
-    const activeStart = currentNodeRef.current.startTime;
-    const activeEnd = currentNodeRef.current.endTime;
-    
-    for (let i = startIndex; i <= endIndex; i++) {
-        const leaf = trieNavigator.leaves[i];
-        const log = activeData[leaf.startTime];
-        const offset = (i * ITEM_HEIGHT) - scrollTop;
-        
-        // If we are aggregating, highlight all items in the current node's range
-        const isCenter = activeDepth === 5 
-           ? i === currentCenterIndex 
-           : (leaf.startTime >= activeStart && leaf.startTime < activeEnd);
-        
-        // Use center of screen for transform scaling
-        const isScreenCenter = i === currentCenterIndex;
-        
-        const distFromCenter = Math.abs(offset);
-        const opacity = distFromCenter < ITEM_HEIGHT ? 1 : Math.max(0, 1 - (distFromCenter / (ITEM_HEIGHT * (VISIBLE_COUNT/2.8))));
-        const blur = distFromCenter < ITEM_HEIGHT ? 0 : Math.min(6, distFromCenter / 120);
 
-        list.push(
-            <div 
-              key={leaf.startTime} 
-              className={`virtual-item ${isCenter ? 'active' : ''}`}
-              style={{ 
-                transform: `translateY(${offset}px) scale(${isScreenCenter ? 1.08 : 1})`, 
-                opacity,
-                filter: `blur(${blur}px)`
-              }}
-            >
-              <div className="item-card">
-                <div className="item-time">{formatTime(log.timestamp)}</div>
-                {activeDepth === 5 ? (
-                    <div className="log-message">{log.message}</div>
-                ) : (
-                    <div className="item-value">{(log.value * 100).toFixed(1)}%</div>
-                )}
-              </div>
-            </div>
-        );
+    for (let i = startIndex; i <= endIndex; i++) {
+      const log = activeData[i];
+      if (!log) continue;
+
+      const offset = (i * ITEM_HEIGHT) - scrollTop;
+      const isScreenCenter = i === playheadIndex;
+      const distFromCenter = Math.abs(offset);
+      const opacity = distFromCenter < ITEM_HEIGHT ? 1 : Math.max(0, 1 - (distFromCenter / (ITEM_HEIGHT * (VISIBLE_COUNT / 2.5))));
+      const blur = distFromCenter < ITEM_HEIGHT ? 0 : Math.min(6, distFromCenter / 120);
+
+      list.push(
+        <div
+          key={log.timestamp}
+          className={`virtual-item ${isScreenCenter ? 'active' : ''}`}
+          style={{
+            transform: `translateY(${offset}px) scale(${isScreenCenter ? 1.08 : 1})`,
+            opacity,
+            filter: `blur(${blur}px)`
+          }}
+        >
+          <div className="item-card">
+            <div className="item-time">{formatTime(log.timestamp)}</div>
+            {absLevel <= 1 ? (
+              <div className="log-message">{log.message}</div>
+            ) : (
+              <div className="item-value">{(log.value * 100).toFixed(1)}%</div>
+            )}
+          </div>
+        </div>
+      );
     }
     return list;
-  }, [startIndex, endIndex, scrollTop, currentCenterIndex, activeData, level]);
+  }, [startIndex, endIndex, scrollTop, playheadIndex, activeData, level]);
 
-  const wpm = Math.abs(Math.round(displayVelocity * 60));
+  const chartData = useMemo(() => {
+    // Pad the chart data to fill the visual domain if needed, 
+    // but recharts handles it if we pass the whole dataset
+    // To optimize, just pass the entire activeData. Recharts crops via domain.
+    return activeData.map(d => ({
+      time: d.timestamp,
+      value: d.value
+    }));
+  }, [activeData]);
+
+
   const progress = (positionRef.current / (listSize - 1)) * 100;
 
   return (
     <div className="lux-console-fullscreen">
-      {/* Side: Metric Quick-Nav */}
       <nav className="metrics-bar">
         {METRICS.map(m => (
-          <button 
-             key={m} 
-             className={`metric-btn ${m === activeMetric ? 'active' : ''}`}
-             onClick={() => { setActiveMetric(m); announcerRef.current.cancel(); }}
+          <button
+            key={m}
+            className={`metric-btn ${m === activeMetric ? 'active' : ''}`}
+            onClick={() => { setActiveMetric(m); announcerRef.current.cancel(); }}
           >
-             {m}
+            {m}
           </button>
         ))}
       </nav>
 
-      {/* Main Container */}
       <div className="console-workspace">
         <header className="console-header-integrated">
           <div className="brand-suite">
@@ -281,12 +294,30 @@ export default function TimelineVisualizer() {
             </div>
           </div>
           <div className="global-stats">
-             <div className="stat-blob linked">
-                <span className="label">SYSTEM</span>
-                <span className="value status" data-linked={audioEnabled}>
-                  {audioEnabled ? 'READY' : 'WAIT'}
-                </span>
-             </div>
+            <button
+              className="lux-btn reset-btn"
+              onClick={() => {
+                positionRef.current = 0;
+                setPlayheadIndex(0);
+                setLevel(0);
+              }}
+              style={{ marginRight: '16px' }}
+            >
+              Reset Timeline
+            </button>
+            <button
+              className="sidebar-toggle"
+              onClick={() => setIsDetailsOpen(!isDetailsOpen)}
+              title="Toggle Sidebar"
+            >
+              {isDetailsOpen ? <PanelRightClose size={18} /> : <PanelRightOpen size={18} />}
+            </button>
+            <div className="stat-blob linked">
+              <span className="label">SYSTEM</span>
+              <span className="value status" data-linked={audioEnabled}>
+                {audioEnabled ? 'READY' : 'WAIT'}
+              </span>
+            </div>
           </div>
         </header>
 
@@ -294,18 +325,42 @@ export default function TimelineVisualizer() {
           <section className="viewport-primary">
             <div className="viewport-overflow">
               <div className="focal-anchor"></div>
-              {devMode ? (
-                 <div className="tree-canvas">
-                    {/* Simplified Dev Mode could go here */}
-                    <div style={{color: '#888', padding: 20}}>Tree Visualization Mode (See Code)</div>
-                 </div>
-              ) : (
-                 <div className="list-content-frame">
-                   {items}
-                 </div>
-              )}
-              <div className="global-scrubber">
-                <div className="scrubber-fill" style={{ width: `${progress}%` }}></div>
+
+              <div className="list-content-frame split-layout">
+                <div className="graph-pane">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <AreaChart data={chartData} margin={{ top: 10, right: 0, left: 0, bottom: 0 }}>
+                      <defs>
+                        <linearGradient id="colorValue" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor="#d4af37" stopOpacity={0.8} />
+                          <stop offset="95%" stopColor="#d4af37" stopOpacity={0} />
+                        </linearGradient>
+                      </defs>
+                      <XAxis dataKey="time" hide type="number" domain={[activeTimeRange.start, activeTimeRange.end]} />
+                      <Area type="monotone" dataKey="value" stroke="#d4af37" fillOpacity={1} fill="url(#colorValue)" isAnimationActive={false} />
+                      <ReferenceLine x={positionRef.current} stroke="#E65722" strokeWidth={2} />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                </div>
+                <div className="details-pane">
+                  {items}
+                </div>
+              </div>
+
+              <div className="timeline-scrubber-wrapper">
+                <input
+                  type="range"
+                  className="timeline-scrubber-input"
+                  min="0"
+                  max={listSize - 1}
+                  step="1"
+                  value={playheadIndex}
+                  onChange={(e) => {
+                    positionRef.current = parseInt(e.target.value);
+                    setPlayheadIndex(positionRef.current);
+                  }}
+                  style={{ '--progress': `${progress}%` } as React.CSSProperties}
+                />
               </div>
             </div>
 
@@ -314,17 +369,7 @@ export default function TimelineVisualizer() {
             </footer>
           </section>
 
-          <aside className="console-details">
-            <div className="metric-panel pulse-aware" data-active={Math.abs(level) > 0}>
-              <Gauge size={18} className="icon-gold" />
-              <div className="metric-readout">
-                <span className="label">Velocity</span>
-                <div className="big-num">{wpm} <span style={{fontSize: '0.8rem'}}>hops/min</span></div>
-                <div className="gear-tag">G{Math.abs(level)} • {mode}</div>
-              </div>
-            </div>
-
-            <div className="config-panel" onClick={() => setMode(m => m === 'linear' ? 'exponential' : 'linear')}>
+          <aside className={`console-details ${isDetailsOpen ? '' : 'collapsed'}`}>            <div className="config-panel" onClick={() => setMode(m => m === 'linear' ? 'exponential' : 'linear')}>
               <div className="cfg-header">
                 <Activity size={14} />
                 <span>Physics Mode</span>
@@ -332,27 +377,27 @@ export default function TimelineVisualizer() {
               <div className="cfg-val">{mode}</div>
             </div>
 
-             <div className="config-panel slider-panel">
-               <div className="cfg-header">
-                 <Clock size={14} />
-                 <span>Sens: {baseSpeed.toFixed(2)}</span>
-               </div>
-               <input 
-                  type="range" min="0.01" max="5.00" step="0.01" 
-                  value={baseSpeed} onChange={(e) => setBaseSpeed(parseFloat(e.target.value))} 
-                  className="lux-slider-mini"
-               />
+            <div className="config-panel slider-panel">
+              <div className="cfg-header">
+                <Clock size={14} />
+                <span>Sens: {baseSpeed.toFixed(2)}</span>
+              </div>
+              <input
+                type="range" min="0.01" max="5.00" step="0.01"
+                value={baseSpeed} onChange={(e) => setBaseSpeed(parseFloat(e.target.value))}
+                className="lux-slider-mini"
+              />
             </div>
 
             <div className="system-footprint">
-               <div className="foot-row">
-                 <Layers size={14} />
-                 <span>Timeline Length: {listSize}s</span>
-               </div>
-               <div className="foot-row">
-                 <Navigation size={14} />
-                 <span>Time Index: {Math.round(positionRef.current)}s</span>
-               </div>
+              <div className="foot-row">
+                <Layers size={14} />
+                <span>Timeline Length: {listSize}s</span>
+              </div>
+              <div className="foot-row">
+                <Navigation size={14} />
+                <span>Time Index: {playheadIndex}s</span>
+              </div>
             </div>
           </aside>
         </main>
