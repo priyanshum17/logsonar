@@ -83,6 +83,13 @@ export class AudioEngine {
      return buffer;
   }
 
+  public oscillatorMapping: Record<MetricType, string> = {
+      CPU: 'sine',
+      Memory: 'triangle',
+      Disk: 'square',
+      Latency: 'bandpass-noise'
+  };
+
   public startDriving(metrics: MetricType[]) {
     if (this.isMuted || !this.audioCtx || this.audioCtx.state === 'suspended') return;
     
@@ -97,14 +104,13 @@ export class AudioEngine {
     const now = this.audioCtx.currentTime;
     
     for (const metric of metrics) {
-      if (this.voices.has(metric)) continue; // Already running
+      if (this.voices.has(metric)) continue; 
       
       const panner = this.audioCtx.createStereoPanner();
-      if (metric === 'CPU') panner.pan.value = -0.6; // Hard left
-      else if (metric === 'Memory') panner.pan.value = 0.6; // Hard right
+      if (metric === 'CPU') panner.pan.value = -0.6;
+      else if (metric === 'Memory') panner.pan.value = 0.6;
       else if (metric === 'Disk') panner.pan.value = -0.3;
-      else if (metric === 'Network') panner.pan.value = 0.3;
-      else panner.pan.value = 0; // Center for Latency, ErrorRate
+      else panner.pan.value = 0.3;
       
       panner.connect(this.masterCompressor!);
       
@@ -113,15 +119,21 @@ export class AudioEngine {
       gainNode.connect(panner);
       
       const voice: AudioVoice = { gain: gainNode, panner };
+      const voiceType = this.oscillatorMapping[metric] || 'sine';
       
-      if (metric === 'Latency') {
+      if (voiceType.includes('noise')) {
          const noiseSource = this.audioCtx.createBufferSource();
          noiseSource.buffer = this.createNoiseBuffer();
          noiseSource.loop = true;
          
          const filter = this.audioCtx.createBiquadFilter();
-         filter.type = 'lowpass';
-         filter.frequency.setValueAtTime(200, now);
+         if (voiceType === 'bandpass-noise') filter.type = 'bandpass';
+         else if (voiceType === 'lowpass-noise') filter.type = 'lowpass';
+         else if (voiceType === 'highpass-noise') filter.type = 'highpass';
+         else filter.type = 'allpass';
+         
+         filter.Q.setValueAtTime(1.0, now);
+         filter.frequency.setValueAtTime(500, now);
          
          noiseSource.connect(filter);
          filter.connect(gainNode);
@@ -131,14 +143,33 @@ export class AudioEngine {
          voice.filter = filter;
       } else {
          const osc = this.audioCtx.createOscillator();
-         if (metric === 'CPU') osc.type = 'sine';
-         else if (metric === 'Memory') osc.type = 'triangle';
-         else if (metric === 'Network') osc.type = 'sawtooth';
-         else if (metric === 'Disk') osc.type = 'square';
-         else if (metric === 'ErrorRate') osc.type = 'sine'; 
+         osc.type = (voiceType === 'am-sine' || voiceType === 'fm-sine') ? 'sine' : (voiceType as OscillatorType);
+         osc.frequency.setValueAtTime(250, now);
          
-         osc.frequency.setValueAtTime(200, now);
-         osc.connect(gainNode);
+         if (voiceType === 'am-sine') {
+             const amOsc = this.audioCtx.createOscillator();
+             amOsc.type = 'sine';
+             amOsc.frequency.setValueAtTime(5, now);
+             const amGain = this.audioCtx.createGain();
+             amGain.gain.setValueAtTime(0.5, now);
+             amOsc.connect(amGain.gain);
+             osc.connect(amGain);
+             amGain.connect(gainNode);
+             amOsc.start(now);
+         } else if (voiceType === 'fm-sine') {
+             const fmOsc = this.audioCtx.createOscillator();
+             fmOsc.type = 'sine';
+             fmOsc.frequency.setValueAtTime(50, now);
+             const fmGain = this.audioCtx.createGain();
+             fmGain.gain.setValueAtTime(100, now);
+             fmOsc.connect(fmGain);
+             fmGain.connect(osc.frequency);
+             osc.connect(gainNode);
+             fmOsc.start(now);
+         } else {
+             osc.connect(gainNode);
+         }
+         
          osc.start(now);
          voice.osc = osc;
       }
@@ -155,7 +186,6 @@ export class AudioEngine {
     
     const now = this.audioCtx.currentTime;
     
-    // 1. Calculate Salience (find the most anomalous metric currently playing)
     let maxSalience = 0;
     for (const metric of this.activeMetrics) {
        if ((values[metric] || 0) > maxSalience) {
@@ -169,37 +199,29 @@ export class AudioEngine {
        
        const value = values[metric] || 0;
        
-       // 2. Dynamic Masking Mitigation (Auditory Spotlight)
-       // If there is a major anomaly (maxSalience > 0.3) and we are polyphonic,
-       // we aggressively duck the volume of the non-anomalous streams.
        let focusMultiplier = 1.0;
        if (this.activeMetrics.length > 1 && maxSalience > 0.3) {
            const distanceToMax = maxSalience - value;
-           // The further a metric is from the peak anomaly, the quieter it gets (down to 10% volume)
            focusMultiplier = Math.max(0.1, 1.0 - (distanceToMax * 2.5));
        }
        
-       if (metric === 'Latency' && voice.filter) {
-          const freq = 200 + (value * 2000); 
-          const vol = (0.02 + (value * 0.15)) * focusMultiplier; 
+       const voiceType = this.oscillatorMapping[metric] || 'sine';
+       
+       if (voiceType.includes('noise') && voice.filter) {
+          const freq = 500 + (value * 3500); 
+          const vol = (0.04 + (value * 0.2)) * focusMultiplier; 
           voice.filter.frequency.setTargetAtTime(freq, now, 0.05);
           voice.gain.gain.setTargetAtTime(vol, now, 0.05);
        } else if (voice.osc) {
-          let freq = 0;
-          let vol = 0;
+          let freq = 200 + (value * 600);
+          let vol = (0.02 + (value * 0.15)) * focusMultiplier;
           
           if (metric === 'CPU') {
-             freq = 100 + (value * 200); 
-             vol = (0.02 + (value * 0.15)) * focusMultiplier;
+             freq = 250 + (value * 550); 
+             vol = (0.04 + (value * 0.2)) * focusMultiplier;
           } else if (metric === 'Memory') {
              freq = 600 + (value * 800);
              vol = (0.02 + (value * 0.1)) * focusMultiplier;
-          } else if (metric === 'ErrorRate') {
-             freq = 400 + (value * 1200);
-             vol = (0.02 + (value * 0.2)) * focusMultiplier;
-          } else {
-             freq = 200 + (value * 600);
-             vol = (0.02 + (value * 0.15)) * focusMultiplier;
           }
           
           voice.osc.frequency.setTargetAtTime(freq, now, 0.05);
@@ -212,25 +234,23 @@ export class AudioEngine {
     const voice = this.voices.get(metric);
     if (!voice) return;
     
-    if (voice.osc) {
-      try { voice.osc.stop(); } catch(e) {}
-      voice.osc.disconnect();
-    }
-    if (voice.noise) {
-      try { voice.noise.stop(); } catch(e) {}
-      voice.noise.disconnect();
-    }
-    if (voice.filter) voice.filter.disconnect();
-    
     if (voice.gain && this.audioCtx) {
       const g = voice.gain;
-      g.gain.cancelScheduledValues(this.audioCtx.currentTime);
-      g.gain.setValueAtTime(g.gain.value, this.audioCtx.currentTime);
-      g.gain.linearRampToValueAtTime(0.001, this.audioCtx.currentTime + 0.05);
+      const now = this.audioCtx.currentTime;
+      g.gain.cancelScheduledValues(now);
+      g.gain.setValueAtTime(g.gain.value, now);
+      g.gain.linearRampToValueAtTime(0.001, now + 0.05);
       setTimeout(() => { 
+          if (voice.osc) { try { voice.osc.stop(); } catch(e) {} voice.osc.disconnect(); }
+          if (voice.noise) { try { voice.noise.stop(); } catch(e) {} voice.noise.disconnect(); }
+          if (voice.filter) voice.filter.disconnect();
           g.disconnect(); 
           voice.panner.disconnect(); 
       }, 50);
+    } else {
+      if (voice.osc) { try { voice.osc.stop(); } catch(e) {} voice.osc.disconnect(); }
+      if (voice.noise) { try { voice.noise.stop(); } catch(e) {} voice.noise.disconnect(); }
+      if (voice.filter) voice.filter.disconnect();
     }
     this.voices.delete(metric);
   }

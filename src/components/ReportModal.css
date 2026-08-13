@@ -1,0 +1,248 @@
+.report-modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.75);
+  backdrop-filter: blur(6px);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 9999;
+}
+
+.report-modal-card {
+  background: #141418;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 12px;
+  width: 480px;
+  max-width: 90vw;
+  padding: 24px;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.6);
+  color: #e0e0e0;
+}
+
+.report-modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  padding-bottom: 12px;
+}
+
+.report-modal-header h3 {
+  margin: 0;
+  font-size: 1.1rem;
+  color: #fff;
+}
+
+.report-preset-badge {
+  background: #E65722;
+  color: #fff;
+  font-size: 0.7rem;
+  font-weight: 700;
+  padding: 3px 8px;
+  border-radius: 4px;
+  letter-spacing: 0.5px;
+}
+
+.report-modal-form {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.report-form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.form-label {
+  font-size: 0.8rem;
+  color: #a0a0b0;
+  font-weight: 500;
+}
+
+.time-display-box {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 6px;
+  padding: 8px 12px;
+  font-family: monospace;
+  font-size: 0.95rem;
+  color: #ffb347;
+}
+
+.metric-chip-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+
+.chip-btn {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #ccc;
+  padding: 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.85rem;
+  transition: all 0.15s ease;
+}
+
+.chip-btn:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.chip-btn.selected {
+  background: rgba(230, 87, 34, 0.25);
+  border-color: #E65722;
+  color: #ffb347;
+  font-weight: 600;
+}
+
+.chain-builder-pool {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+
+.chain-chip-btn {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #888;
+  padding: 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.8rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.chain-chip-btn.in-chain {
+  background: rgba(0, 196, 159, 0.2);
+  border-color: #00C49F;
+  color: #fff;
+  font-weight: 600;
+}
+
+.chain-rank {
+  background: #00C49F;
+  color: #000;
+  border-radius: 50%;
+  width: 18px;
+  height: 18px;
+  font-size: 0.65rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: bold;
+}
+
+.chain-preview {
+  font-size: 0.75rem;
+  color: #82ca9d;
+  font-family: monospace;
+  background: rgba(0, 0, 0, 0.3);
+  padding: 6px 10px;
+  border-radius: 4px;
+}
+
+.report-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 10px;
+}
+
+.modal-btn {
+  padding: 8px 16px;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  cursor: pointer;
+  border: none;
+  font-weight: 600;
+}
+
+.modal-btn.secondary {
+  background: rgba(255, 255, 255, 0.1);
+  color: #ccc;
+}
+
+.modal-btn.primary {
+  background: #E65722;
+  color: #fff;
+}
+
+.modal-btn.primary:hover {
+  background: #f0632e;
+}
+
+/* Detection modality selector */
+.modality-chip-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+
+.modality-btn {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #aaa;
+  padding: 10px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.82rem;
+  font-weight: 500;
+  transition: all 0.15s ease;
+  text-align: center;
+}
+
+.modality-btn:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+}
+
+.modality-btn.selected {
+  background: rgba(136, 132, 216, 0.25);
+  border-color: #8884d8;
+  color: #c8c6ff;
+  font-weight: 700;
+}
+
+/* Confidence star rating */
+.confidence-star-grid {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.confidence-btn {
+  background: none;
+  border: none;
+  font-size: 1.4rem;
+  cursor: pointer;
+  color: rgba(255, 255, 255, 0.15);
+  padding: 0 2px;
+  transition: all 0.12s ease;
+  line-height: 1;
+}
+
+.confidence-btn:hover {
+  transform: scale(1.2);
+  color: rgba(255, 180, 60, 0.6);
+}
+
+.confidence-btn.filled {
+  color: #ffb347;
+}
+
+.confidence-label {
+  font-size: 0.75rem;
+  color: #888;
+  margin-left: 8px;
+}

@@ -9,7 +9,7 @@
 }
 
 .metrics-bar {
-  width: 70px;
+  width: 80px;
   background: #0a0a0a;
   border-right: 1px solid #1a1a1a;
   display: flex;
@@ -17,6 +17,8 @@
   padding-top: 60px;
   align-items: center;
   gap: 20px;
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 
 .metric-btn {
@@ -41,6 +43,60 @@
   color: #d4af37;
   text-shadow: 0 0 10px rgba(212, 175, 55, 0.5);
   font-weight: 600;
+}
+
+/* Keyboard / button legend in left sidebar */
+.sidebar-legend {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 0 6px;
+  box-sizing: border-box;
+  margin-top: auto;
+  padding-bottom: 20px;
+}
+
+.legend-divider {
+  width: 60%;
+  height: 1px;
+  background: #222;
+  margin: 4px 0;
+}
+
+.legend-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+}
+
+.legend-key {
+  background: #1a1a2e;
+  border: 1px solid #333;
+  border-bottom: 2px solid #444;
+  border-radius: 4px;
+  color: #d4af37;
+  font-family: monospace;
+  font-size: 0.7rem;
+  font-weight: 700;
+  padding: 2px 6px;
+  line-height: 1;
+  text-align: center;
+  min-width: 20px;
+  letter-spacing: 0;
+}
+
+.legend-label {
+  font-size: 0.55rem;
+  color: #e8e8e8;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  line-height: 1.2;
+  text-align: center;
+  white-space: nowrap;
 }
 
 .console-workspace {
@@ -115,7 +171,7 @@
 
 .global-stats {
   display: flex;
-  gap: 25px;
+  gap: 12px;
   align-items: center;
 }
 
@@ -254,8 +310,9 @@
 }
 
 .item-value {
-  font-size: 1.4rem;
+  font-size: 1.1rem;
   color: #fff;
+  font-family: monospace;
 }
 
 .virtual-item.active .item-time {
@@ -270,10 +327,7 @@
 .log-message {
   font-size: 0.9rem;
   color: #888;
-  max-width: 600px;
   white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 .timeline-scrubber-wrapper {
@@ -318,12 +372,37 @@
   color: #888;
   border: 1px solid #222;
   font-size: 0.75rem;
-  padding: 1rem;
+  padding: 6px 12px;
+  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  transition: all 0.2s ease;
 }
 .lux-btn.reset-btn:hover {
   background: #1a1a1a;
   color: #fff;
   border-color: #333;
+}
+
+/* Fixed study button widths to prevent layout jumps on text state change */
+.study-btn-log {
+  min-width: 120px;
+}
+
+.study-btn-baseline {
+  min-width: 165px;
+}
+
+.study-btn-report {
+  min-width: 110px;
+}
+
+.study-btn-view {
+  min-width: 95px;
 }
 
 .footer-controls {
@@ -505,3 +584,133 @@
   background: #d4af37;
   border-radius: 50%;
 }
+
+/* Preset selector bar & Overlay tracking task */
+.preset-selector-bar {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.preset-btn {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #a0a0b0;
+  padding: 4px 10px;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  cursor: pointer;
+  font-weight: 500;
+  transition: all 0.2s ease;
+}
+
+.preset-btn:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+}
+
+.preset-btn.active {
+  background: rgba(230, 87, 34, 0.25);
+  border-color: #E65722;
+  color: #ffb347;
+  font-weight: 600;
+}
+
+.overlay-tracking-wrapper {
+  position: absolute;
+  z-index: 100;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.overlay-tracking-wrapper.floating-mode {
+  top: 20px;
+  right: 20px;
+  width: 580px;
+  height: 380px;
+}
+
+.overlay-tracking-wrapper.full-mode {
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 88%;
+  height: 82%;
+}
+
+/* Chart becomes a compact corner reference panel while tracking task is primary */
+.chart-logging-mini {
+  position: absolute !important;
+  top: 16px;
+  right: 16px;
+  width: 340px;
+  height: 220px;
+  z-index: 110;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(8, 8, 12, 0.92);
+  backdrop-filter: blur(10px);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.6);
+  opacity: 0.88;
+  pointer-events: none;
+}
+
+/* Sidebar Study Presets & Baseline Tour */
+.sidebar-preset-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.sidebar-preset-btn {
+  background: #111;
+  border: 1px solid #222;
+  color: #a0a0b0;
+  padding: 10px 12px;
+  border-radius: 6px;
+  font-size: 0.8rem;
+  cursor: pointer;
+  font-weight: 500;
+  text-align: left;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  transition: all 0.2s ease;
+}
+
+.sidebar-preset-btn:hover {
+  background: #1a1a1a;
+  color: #fff;
+  border-color: #3a3a3a;
+}
+
+.sidebar-preset-btn.active {
+  background: rgba(230, 87, 34, 0.2);
+  border-color: #E65722;
+  color: #ffb347;
+  font-weight: 600;
+}
+
+.sidebar-baseline-btn {
+  width: 100%;
+  padding: 10px 12px;
+  background: #151515;
+  border: 1px solid #252525;
+  color: #ccc;
+  border-radius: 6px;
+  font-size: 0.8rem;
+  cursor: pointer;
+  font-weight: 600;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  transition: all 0.2s ease;
+}
+
+.sidebar-baseline-btn:hover {
+  background: #1f1f1f;
+  color: #fff;
+  border-color: #3a3a3a;
+}
+
+
+
